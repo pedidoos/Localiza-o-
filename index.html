@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Envio Rápido - Pizzaria Italia Taquaralto</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --text-color: #1c1e21;
+            --label-color: #4b4f56;
+            --input-border: #ccd0d5;
+            --btn-bg: #25D366;
+            --btn-text: white;
+        }
+
+        /* Estilo Dark Mode */
+        .dark-mode {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --label-color: #b0b0b0;
+            --input-border: #333;
+            --btn-bg: #128c7e;
+            --btn-text: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: var(--text-color);
+            font-size: 1.25rem;
+            text-align: center;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--label-color);
+            font-size: 0.9rem;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--input-border);
+            border-radius: 8px;
+            font-size: 1rem;
+            margin-bottom: 16px;
+            outline: none;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+        }
+
+        input:focus {
+            border-color: var(--btn-bg);
+        }
+
+        button {
+            width: 100%;
+            background-color: var(--btn-bg);
+            color: var(--btn-text);
+            border: none;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        button:hover {
+            filter: brightness(1.1);
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>🍕 Pedir Localização</h2>
+    
+    <label for="nome">Nome do Cliente:</label>
+    <input type="text" id="nome" placeholder="Ex: João">
+
+    <label for="telefone">WhatsApp do Cliente (DDD + Número):</label>
+    <input type="tel" id="telefone" placeholder="63999999999">
+
+    <button onclick="enviarWhatsApp()">Enviar Solicitação</button>
+</div>
+
+<script>
+    // Função que verifica o horário e aplica o tema
+    function aplicarTemaAutomatico() {
+        const hora = new Date().getHours();
+        // Considera noite entre 18h e 06h
+        if (hora >= 18 || hora < 6) {
+            document.body.classList.add('dark-mode');
+        } else {
+            document.body.classList.remove('dark-mode');
+        }
+    }
+
+    // Aplica assim que a página carregar
+    aplicarTemaAutomatico();
+
+    function enviarWhatsApp() {
+        const nomeInput = document.getElementById('nome').value.trim();
+        let telefone = document.getElementById('telefone').value.replace(/\D/g, '');
+
+        if (!telefone) {
+            alert('Por favor, digite o número do cliente.');
+            return;
+        }
+
+        if (telefone.length === 10 || telefone.length === 11) {
+            telefone = '55' + telefone;
+        }
+
+        // Nome em negrito
+        const nomeFormatado = nomeInput ? `*${nomeInput}*` : '';
+
+        // Monta a mensagem final
+        const saudacao = nomeInput ? `Olá ${nomeFormatado}, ` : 'Olá, ';
+        const mensagem = `${saudacao}sou entregador da pizzaria Italia Taquaralto. *Me envia sua localização?*`;
+        
+        const url = `https://api.whatsapp.com/send?phone=${telefone}&text=${encodeURIComponent(mensagem)}`;
+
+        window.open(url, '_blank');
+    }
+</script>
+
+</body>
+</html>
