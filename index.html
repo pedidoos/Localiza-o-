@@ -200,9 +200,12 @@
         const btnAbrirCamera = document.getElementById('btnAbrirCamera');
 
         try {
-            // Solicita permissão e prioriza a câmera traseira
+            // Tenta abrir a câmera traseira solicitando a ativação do flash (torch)
             streamCamera = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: "environment" } }
+                video: { 
+                    facingMode: { ideal: "environment" },
+                    advanced: [{ torch: true }]
+                }
             });
 
             video.srcObject = streamCamera;
@@ -210,8 +213,22 @@
             btnAbrirCamera.style.display = 'none';
             statusTxt.innerText = 'Aponte para a comanda e clique em Capturar.';
         } catch (err) {
-            console.error(err);
-            alert('Permissão de câmera negada ou câmera indisponível.');
+            console.warn("Não foi possível acionar o flash diretamente. Tentando câmera normal:", err);
+            
+            // Fallback: Tenta abrir a câmera sem a instrução do flash (compatibilidade)
+            try {
+                streamCamera = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: "environment" } }
+                });
+
+                video.srcObject = streamCamera;
+                cameraContainer.style.display = 'block';
+                btnAbrirCamera.style.display = 'none';
+                statusTxt.innerText = 'Aponte para a comanda e clique em Capturar.';
+            } catch (errFallback) {
+                console.error("Erro ao abrir a câmera:", errFallback);
+                alert('Permissão de câmera negada ou câmera indisponível.');
+            }
         }
     }
 
