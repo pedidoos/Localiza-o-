@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Envio Rápido - Pizzaria Italia Taquaralto</title>
+    <!-- Biblioteca gratuita de OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         :root {
             --bg-color: #f0f2f5;
@@ -13,9 +15,10 @@
             --input-border: #ccd0d5;
             --btn-bg: #25D366;
             --btn-text: white;
+            --btn-camera: #007bff;
+            --btn-danger: #dc3545;
         }
 
-        /* Estilo Dark Mode */
         .dark-mode {
             --bg-color: #121212;
             --card-bg: #1e1e1e;
@@ -24,6 +27,8 @@
             --input-border: #333;
             --btn-bg: #128c7e;
             --btn-text: #ffffff;
+            --btn-camera: #0056b3;
+            --btn-danger: #b02a37;
         }
 
         * {
@@ -85,19 +90,62 @@
 
         button {
             width: 100%;
-            background-color: var(--btn-bg);
-            color: var(--btn-text);
             border: none;
             padding: 14px;
             border-radius: 8px;
             font-size: 1rem;
             font-weight: bold;
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: background-color 0.2s, opacity 0.2s;
         }
-        
-        button:hover {
-            filter: brightness(1.1);
+
+        .btn-camera {
+            background-color: var(--btn-camera);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .btn-danger {
+            background-color: var(--btn-danger);
+            color: white;
+            margin-top: 8px;
+        }
+
+        .btn-send {
+            background-color: var(--btn-bg);
+            color: var(--btn-text);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Área do Vídeo da Câmera */
+        #cameraContainer {
+            display: none;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        video {
+            width: 100%;
+            border-radius: 12px;
+            background: #000;
+            max-height: 250px;
+            object-fit: cover;
+        }
+
+        .status {
+            font-size: 0.85rem;
+            text-align: center;
+            margin-bottom: 12px;
+            color: var(--label-color);
+            font-weight: 500;
         }
     </style>
 </head>
@@ -105,30 +153,132 @@
 
 <div class="card">
     <h2>🍕 Pedir Localização</h2>
-    
+
+    <!-- Botão Inicial -->
+    <button type="button" class="btn-camera" id="btnAbrirCamera" onclick="abrirCamera()">
+        📸 Abrir Câmera
+    </button>
+
+    <!-- Área de Visualização da Câmera -->
+    <div id="cameraContainer">
+        <video id="videoPreview" autoplay playsinline></video>
+        <button type="button" class="btn-camera" onclick="capturarEProcessar()">📷 Capturar Foto</button>
+        <button type="button" class="btn-danger" onclick="fecharCamera()">Cancelar</button>
+    </div>
+
+    <!-- Canvas Escondido para tirar o frame -->
+    <canvas id="canvasFrame" style="display: none;"></canvas>
+
+    <div class="status" id="statusTxt"></div>
+
     <label for="nome">Nome do Cliente:</label>
     <input type="text" id="nome" placeholder="Ex: João">
 
     <label for="telefone">WhatsApp do Cliente (DDD + Número):</label>
     <input type="tel" id="telefone" placeholder="63999999999">
 
-    <button onclick="enviarWhatsApp()">Enviar Solicitação</button>
+    <button type="button" class="btn-send" onclick="enviarWhatsApp()">Enviar Solicitação</button>
 </div>
 
 <script>
-    // Função que verifica o horário e aplica o tema
+    let streamCamera = null;
+
     function aplicarTemaAutomatico() {
         const hora = new Date().getHours();
-        // Considera noite entre 18h e 06h
         if (hora >= 18 || hora < 6) {
             document.body.classList.add('dark-mode');
         } else {
             document.body.classList.remove('dark-mode');
         }
     }
-
-    // Aplica assim que a página carregar
     aplicarTemaAutomatico();
+
+    async function abrirCamera() {
+        const cameraContainer = document.getElementById('cameraContainer');
+        const video = document.getElementById('videoPreview');
+        const statusTxt = document.getElementById('statusTxt');
+        const btnAbrirCamera = document.getElementById('btnAbrirCamera');
+
+        try {
+            // Solicita permissão e prioriza a câmera traseira
+            streamCamera = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: "environment" } }
+            });
+
+            video.srcObject = streamCamera;
+            cameraContainer.style.display = 'block';
+            btnAbrirCamera.style.display = 'none';
+            statusTxt.innerText = 'Aponte para a comanda e clique em Capturar.';
+        } catch (err) {
+            console.error(err);
+            alert('Permissão de câmera negada ou câmera indisponível.');
+        }
+    }
+
+    function fecharCamera() {
+        if (streamCamera) {
+            streamCamera.getTracks().forEach(track => track.stop());
+            streamCamera = null;
+        }
+        document.getElementById('cameraContainer').style.display = 'none';
+        document.getElementById('btnAbrirCamera').style.display = 'flex';
+    }
+
+    async function capturarEProcessar() {
+        const video = document.getElementById('videoPreview');
+        const canvas = document.getElementById('canvasFrame');
+        const statusTxt = document.getElementById('statusTxt');
+        const context = canvas.getContext('2d');
+
+        // Configura tamanho do canvas idêntico ao vídeo
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Encerra a transmissão da câmera
+        fecharCamera();
+
+        statusTxt.innerText = '⏳ Lendo dados da foto...';
+
+        // Converte o frame capturado em imagem para o OCR
+        canvas.toBlob(async (blob) => {
+            try {
+                const result = await Tesseract.recognize(
+                    blob,
+                    'por',
+                    {
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                statusTxt.innerText = `⏳ Lendo foto... ${Math.round(m.progress * 100)}%`;
+                            }
+                        }
+                    }
+                );
+
+                const textoLido = result.data.text;
+
+                // Procura número de telefone com DDD
+                const numerosEncontrados = textoLido.match(/(?:(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?)(?:9\s?\d{4}[-\s]?\d{4}|\d{4}[-\s]?\d{4})/g);
+                if (numerosEncontrados && numerosEncontrados.length > 0) {
+                    const telefoneLimpo = numerosEncontrados[0].replace(/\D/g, '');
+                    if (telefoneLimpo.length >= 10) {
+                        document.getElementById('telefone').value = telefoneLimpo.slice(-11);
+                    }
+                }
+
+                // Procura nome
+                const nomeMatch = textoLido.match(/(?:cliente|nome|para):\s*([a-zA-ZÀ-ÿ\s]+)/i);
+                if (nomeMatch && nomeMatch[1]) {
+                    document.getElementById('nome').value = nomeMatch[1].trim().split('\n')[0];
+                }
+
+                statusTxt.innerText = '✅ Dados lidos com sucesso!';
+            } catch (err) {
+                console.error(err);
+                statusTxt.innerText = '❌ Erro ao ler foto. Preencha manualmente.';
+            }
+        }, 'image/jpeg');
+    }
 
     function enviarWhatsApp() {
         const nomeInput = document.getElementById('nome').value.trim();
@@ -143,15 +293,11 @@
             telefone = '55' + telefone;
         }
 
-        // Nome em negrito
         const nomeFormatado = nomeInput ? `*${nomeInput}*` : '';
-
-        // Monta a mensagem final
         const saudacao = nomeInput ? `Olá ${nomeFormatado}, ` : 'Olá, ';
         const mensagem = `${saudacao}sou entregador da pizzaria Italia Taquaralto. *Me envia sua localização?*`;
-        
-        const url = `https://api.whatsapp.com/send?phone=${telefone}&text=${encodeURIComponent(mensagem)}`;
 
+        const url = `https://api.whatsapp.com/send?phone=${telefone}&text=${encodeURIComponent(mensagem)}`;
         window.open(url, '_blank');
     }
 </script>
