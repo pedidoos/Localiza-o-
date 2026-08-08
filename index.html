@@ -147,6 +147,26 @@
             color: var(--label-color);
             font-weight: 500;
         }
+
+        /* Área de Log de Texto Lido */
+        details {
+            margin-top: 15px;
+            font-size: 0.8rem;
+            color: var(--label-color);
+        }
+
+        textarea {
+            width: 100%;
+            height: 80px;
+            font-size: 0.75rem;
+            background: var(--bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--input-border);
+            border-radius: 6px;
+            padding: 6px;
+            margin-top: 5px;
+            resize: none;
+        }
     </style>
 </head>
 <body>
@@ -178,6 +198,11 @@
     <input type="tel" id="telefone" placeholder="63999999999">
 
     <button type="button" class="btn-send" onclick="enviarWhatsApp()">Enviar Solicitação</button>
+
+    <details>
+        <summary>🔍 Ver texto detectado na foto</summary>
+        <textarea id="debugTexto" readonly placeholder="O texto extraído da comanda aparecerá aqui..."></textarea>
+    </details>
 </div>
 
 <script>
@@ -200,7 +225,7 @@
         const btnAbrirCamera = document.getElementById('btnAbrirCamera');
 
         try {
-            // Tenta abrir a câmera traseira solicitando a ativação do flash (torch)
+            // Tenta abrir a câmera com suporte ao flash (torch)
             streamCamera = await navigator.mediaDevices.getUserMedia({
                 video: { 
                     facingMode: { ideal: "environment" },
@@ -214,8 +239,6 @@
             statusTxt.innerText = 'Aponte para a comanda e clique em Capturar.';
         } catch (err) {
             console.warn("Não foi possível acionar o flash diretamente. Tentando câmera normal:", err);
-            
-            // Fallback: Tenta abrir a câmera sem a instrução do flash (compatibilidade)
             try {
                 streamCamera = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: { ideal: "environment" } }
@@ -241,23 +264,44 @@
         document.getElementById('btnAbrirCamera').style.display = 'flex';
     }
 
+    // Melhora a nitidez e o contraste da imagem no canvas antes do OCR
+    function otimizarImagemParaOCR(canvas) {
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+            // Converte para escala de cinza
+            let gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            // Aplica alto contraste (Binarização suave)
+            gray = gray < 120 ? 0 : 255;
+            
+            data[i]     = gray; // R
+            data[i + 1] = gray; // G
+            data[i + 2] = gray; // B
+        }
+        ctx.putImageData(imgData, 0, 0);
+    }
+
     async function capturarEProcessar() {
         const video = document.getElementById('videoPreview');
         const canvas = document.getElementById('canvasFrame');
         const statusTxt = document.getElementById('statusTxt');
+        const debugTexto = document.getElementById('debugTexto');
         const context = canvas.getContext('2d');
 
-        // Configura tamanho do canvas idêntico ao vídeo
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+        // Aplica o filtro de nitidez/contraste
+        otimizarImagemParaOCR(canvas);
+
         // Encerra a transmissão da câmera
         fecharCamera();
 
-        statusTxt.innerText = '⏳ Lendo dados da foto...';
+        statusTxt.innerText = '⏳ Processando imagem...';
 
-        // Converte o frame capturado em imagem para o OCR
         canvas.toBlob(async (blob) => {
             try {
                 const result = await Tesseract.recognize(
@@ -273,23 +317,53 @@
                 );
 
                 const textoLido = result.data.text;
+                debugTexto.value = textoLido; // Exibe o texto cru para o usuário conferir
 
-                // Procura número de telefone com DDD
-                const numerosEncontrados = textoLido.match(/(?:(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?)(?:9\s?\d{4}[-\s]?\d{4}|\d{4}[-\s]?\d{4})/g);
+                // 1. EXTRAÇÃO DE TELEFONE
+                // Corrige erros comuns onde o OCR troca números por letras parecidas
+                let textoParaTelefone = textoLido
+                    .replace(/[O|o]/g, '0')
+                    .replace(/[I|l|i]/g, '1')
+                    .replace(/[S|s]/g, '5')
+                    .replace(/[B]/g, '8');
+
+                // Procura por sequências de 10 a 11 dígitos numéricos (com ou sem DDD e pontuação)
+                const regexTelefone = /(?:(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?)(?:9\s?\d{4}[-\s]?\d{4}|\d{4}[-\s]?\d{4})/g;
+                const numerosEncontrados = textoParaTelefone.match(regexTelefone);
+
+                let achouTelefone = false;
                 if (numerosEncontrados && numerosEncontrados.length > 0) {
-                    const telefoneLimpo = numerosEncontrados[0].replace(/\D/g, '');
-                    if (telefoneLimpo.length >= 10) {
-                        document.getElementById('telefone').value = telefoneLimpo.slice(-11);
+                    for (let num of numerosEncontrados) {
+                        const limpo = num.replace(/\D/g, '');
+                        if (limpo.length >= 10 && limpo.length <= 11) {
+                            document.getElementById('telefone').value = limpo;
+                            achouTelefone = true;
+                            break;
+                        }
                     }
                 }
 
-                // Procura nome
-                const nomeMatch = textoLido.match(/(?:cliente|nome|para):\s*([a-zA-ZÀ-ÿ\s]+)/i);
+                // 2. EXTRAÇÃO DE NOME
+                // Procura por padrões como "CLI: NOME", "CLIENTE: NOME", "NOME: NOME", "PARA: NOME"
+                const regexNome = /(?:cli|cliente|nome|para|destinatario|rec):\s*([a-zA-ZÀ-ÿ\s]{3,30})/i;
+                const nomeMatch = textoLido.match(regexNome);
+
+                let achouNome = false;
                 if (nomeMatch && nomeMatch[1]) {
-                    document.getElementById('nome').value = nomeMatch[1].trim().split('\n')[0];
+                    const nomeFormatado = nomeMatch[1].trim().split('\n')[0];
+                    if (nomeFormatado.length >= 2) {
+                        document.getElementById('nome').value = nomeFormatado;
+                        achouNome = true;
+                    }
                 }
 
-                statusTxt.innerText = '✅ Dados lidos com sucesso!';
+                // Status Final
+                if (achouTelefone || achouNome) {
+                    statusTxt.innerText = '✅ Dados lidos com sucesso!';
+                } else {
+                    statusTxt.innerText = '⚠️ Não foi possível identificar os dados. Verifique o campo abaixo ou preencha manualmente.';
+                }
+
             } catch (err) {
                 console.error(err);
                 statusTxt.innerText = '❌ Erro ao ler foto. Preencha manualmente.';
