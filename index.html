@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Leitor de Comanda - Pizzaria Italia</title>
-    <!-- Biblioteca Tesseract.js -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; background: #f0f2f5; padding: 15px; display: flex; justify-content: center; }
@@ -12,12 +11,12 @@
         h2 { text-align: center; color: #d32f2f; margin-top: 0; }
         label { font-weight: bold; margin-top: 15px; display: block; font-size: 14px; color: #333; }
         input, button, textarea { width: 100%; padding: 12px; margin-top: 5px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; font-size: 15px; }
-        .btn-capture { background: #007bff; color: white; font-weight: bold; border: none; cursor: pointer; font-size: 16px; text-align: center; display: block; }
+        .btn-capture { background: #007bff; color: white; font-weight: bold; border: none; cursor: pointer; font-size: 16px; }
         .btn-green { background: #25D366; color: white; font-weight: bold; border: none; cursor: pointer; margin-top: 12px; }
         .btn-gray { background: #6c757d; color: white; font-weight: bold; border: none; cursor: pointer; margin-top: 8px; }
         #status { text-align: center; margin: 12px 0; color: #d32f2f; font-weight: bold; font-size: 14px; }
-        #previewImg { width: 100%; max-height: 200px; object-fit: contain; border-radius: 8px; margin-top: 10px; display: none; border: 1px solid #ddd; }
-        .debug-box { font-size: 11px; color: #666; background: #f8f9fa; height: 70px; resize: none; margin-top: 5px; }
+        #previewImg { width: 100%; max-height: 150px; object-fit: contain; border-radius: 8px; margin-top: 10px; display: none; border: 1px solid #ddd; }
+        .debug-box { font-size: 10px; color: #666; background: #f8f9fa; height: 50px; resize: none; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -25,25 +24,22 @@
 <div class="card">
     <h2>🍕 Pizzaria Italia</h2>
     
-    <!-- Input invisível que aciona a câmera nativa do celular -->
     <input type="file" id="fotoInput" accept="image/*" capture="environment" style="display:none" onchange="processarFoto(event)">
-    
     <button class="btn-capture" onclick="document.getElementById('fotoInput').click()">📸 Tirar Foto da Comanda</button>
     
-    <img id="previewImg" alt="Prévia da Foto">
+    <img id="previewImg">
     <div id="status"></div>
 
-    <label for="nome">Nome:</label>
+    <label>Nome:</label>
     <input type="text" id="nome" placeholder="Nome do cliente">
     
-    <label for="telefone">Telefone:</label>
+    <label>Telefone:</label>
     <input type="tel" id="telefone" placeholder="Telefone do cliente">
 
     <button class="btn-green" onclick="enviarLink()">Enviar no WhatsApp</button>
     <button class="btn-gray" onclick="copiarParaAreaDeTransferencia()">📋 Copiar Link</button>
 
-    <label style="font-size: 11px; color: #888; margin-top: 20px;">Texto Lido (Diagnóstico):</label>
-    <textarea id="debugText" class="debug-box" readonly placeholder="O texto extraído da foto aparecerá aqui..."></textarea>
+    <textarea id="debugText" class="debug-box" readonly placeholder="Diagnóstico da leitura..."></textarea>
 </div>
 
 <script>
@@ -54,106 +50,69 @@
         if (!file) return;
 
         const statusDiv = document.getElementById('status');
-        const previewImg = document.getElementById('previewImg');
         const debugText = document.getElementById('debugText');
-
-        // Exibe prévia da foto
-        previewImg.src = URL.createObjectURL(file);
-        previewImg.style.display = 'block';
-        statusDiv.innerText = "⏳ Lendo comanda em alta resolução...";
+        
+        document.getElementById('previewImg').src = URL.createObjectURL(file);
+        document.getElementById('previewImg').style.display = 'block';
+        statusDiv.innerText = "⏳ Processando...";
         debugText.value = "";
 
         const img = new Image();
         img.src = URL.createObjectURL(file);
 
         img.onload = async () => {
-            // Cria um canvas para tratar a imagem mantendo a alta resolução
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+            // REDIMENSIONAMENTO: Limita a 1200px de largura para acelerar o Tesseract sem perder qualidade
+            const MAX_WIDTH = 1200;
+            const scale = Math.min(1, MAX_WIDTH / img.width);
             
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width * scale;
+            canvas.height = img.height * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-            // Aumento leve de contraste e conversão para Tons de Cinza
-            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imgData.data;
-            for (let i = 0; i < data.length; i += 4) {
-                let gray = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
-                // Aumenta o contraste das letras escuras no papel claro
-                gray = gray < 130 ? gray * 0.7 : Math.min(255, gray * 1.2);
-                data[i] = data[i + 1] = data[i + 2] = gray;
-            }
-            ctx.putImageData(imgData, 0, 0);
-
-            // Executa o OCR
+            // OCR Rápido
             Tesseract.recognize(canvas, 'por').then(({ data: { text } }) => {
-                statusDiv.innerText = "";
-                debugText.value = text; // Mostra tudo o que foi lido na caixa cinza
-
-                // 1. EXTRAÇÃO DO NOME
-                // Procura a linha "Nome:" ou "Cliente"
+                debugText.value = text;
+                
+                // Extração Nome
                 const matchNome = text.match(/Nome:\s*([^\n\r]+)/i);
                 if (matchNome && matchNome[1]) {
-                    // Limpa caracteres especiais do nome
-                    let nomeLimpo = matchNome[1].replace(/[^a-zA-ZÀ-ÿ\s]/g, '').trim();
-                    document.getElementById('nome').value = nomeLimpo;
+                    document.getElementById('nome').value = matchNome[1].replace(/[^a-zA-ZÀ-ÿ\s]/g, '').trim();
                 }
 
-                // 2. EXTRAÇÃO DO TELEFONE
-                // Trata erros comuns do OCR em números (ex: trocar 'O' por '0', 'I' por '1')
-                let textoTratado = text
-                    .replace(/Telefone:/i, 'TELEFONE_TAG ')
-                    .replace(/[O|o]/g, '0')
-                    .replace(/[I|l|\|]/g, '1');
-
-                // Procura a tag TELEFONE_TAG ou busca direto por padrão de DDD (63) + 9 dígitos
-                const matchTel = textoTratado.match(/TELEFONE_TAG\s*\(?(\d{2})\)?\s*(\d{1})\s*(\d{4})[- ]?(\d{4})/i) ||
-                                 textoTratado.match(/\(?(\d{2})\)?\s*(9)\s*(\d{4})[- ]?(\d{4})/);
-
+                // Extração Telefone
+                const apenasNumeros = text.replace(/Telefone:/i, 'TAG_TEL').replace(/\D/g, '');
+                const matchTel = text.match(/(?:Telefone|Celular|WhatsApp)[:\s]*.*?(\d{2})\s*(\d{1})\s*(\d{4})[- ]?(\d{4})/i);
+                
                 if (matchTel) {
-                    const numeroCompleto = matchTel[1] + matchTel[2] + matchTel[3] + matchTel[4];
-                    if (numeroCompleto !== NUMERO_PIZZARIA) {
-                        document.getElementById('telefone').value = numeroCompleto;
-                        statusDiv.innerText = "✅ Leitura concluída com sucesso!";
-                        return;
-                    }
+                    document.getElementById('telefone').value = matchTel[1] + matchTel[2] + matchTel[3] + matchTel[4];
+                } else {
+                    const fallback = text.replace(/\D/g, '').match(/\d{11}/);
+                    if(fallback) document.getElementById('telefone').value = fallback[0];
                 }
 
-                // Plano B: Pega qualquer sequência isolada de 11 números
-                const apenasNumeros = text.replace(/\D/g, '');
-                const buscaSequencia = apenasNumeros.match(/\d{11}/g);
-
-                if (buscaSequencia) {
-                    for (let num of buscaSequencia) {
-                        if (num !== NUMERO_PIZZARIA) {
-                            document.getElementById('telefone').value = num;
-                            statusDiv.innerText = "✅ Leitura concluída!";
-                            return;
-                        }
-                    }
-                }
-
-                statusDiv.innerText = "⚠️ Verifique os dados abaixo.";
-            }).catch(err => {
-                statusDiv.innerText = "❌ Erro ao processar a imagem.";
+                statusDiv.innerText = "✅ Leitura rápida concluída!";
             });
         };
     }
 
+    function getMensagem() {
+        const nome = document.getElementById('nome').value || "Cliente";
+        return encodeURIComponent(`Olá ${nome}, aqui é da Pizzaria Italia. Seu pedido está em preparo! Por favor, poderia nos enviar sua localização atual para a entrega?`);
+    }
+
     function enviarLink() {
         let tel = document.getElementById('telefone').value.replace(/\D/g, '');
-        let nome = document.getElementById('nome').value;
         if (!tel) return alert("Preencha o telefone!");
-        window.open(`https://api.whatsapp.com/send?phone=55${tel}&text=Olá ${nome}, aqui é da Pizzaria Italia.`, '_blank');
+        window.open(`https://api.whatsapp.com/send?phone=55${tel}&text=${getMensagem()}`, '_blank');
     }
 
     function copiarParaAreaDeTransferencia() {
         let tel = document.getElementById('telefone').value.replace(/\D/g, '');
-        let nome = document.getElementById('nome').value;
         if (!tel) return alert("Preencha o telefone!");
-        let link = `https://wa.me/55${tel}?text=Olá ${nome}, aqui é da Pizzaria Italia.`;
-        navigator.clipboard.writeText(link).then(() => alert("Link copiado com sucesso!"));
+        let link = `https://wa.me/55${tel}?text=${getMensagem()}`;
+        navigator.clipboard.writeText(link).then(() => alert("Copiado com sucesso!"));
     }
 </script>
 </body>
