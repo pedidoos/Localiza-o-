@@ -2,47 +2,36 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Leitor de Comanda Profissional</title>
+    <title>Leitor de Comanda</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #f0f2f5; padding: 20px; display: flex; justify-content: center; }
         .card { background: white; padding: 20px; border-radius: 15px; width: 100%; max-width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h2 { text-align: center; color: #d32f2f; margin: 0 0 15px 0; }
-        .btn-capture { background: #007bff; color: white; width: 100%; padding: 15px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        label { font-weight: bold; display: block; margin-top: 15px; }
-        input { width: 100%; padding: 10px; margin-top: 5px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
-        .actions { display: flex; gap: 10px; margin-top: 20px; }
-        button { flex: 1; padding: 10px; border: none; border-radius: 5px; cursor: pointer; color: white; font-weight: bold; }
-        .btn-whats { background: #25D366; }
-        .btn-copy { background: #6c757d; }
+        .btn-capture { background: #d32f2f; color: white; width: 100%; padding: 15px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        input { width: 100%; padding: 10px; margin-top: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        .debug-area { font-size: 9px; color: #888; margin-top: 10px; height: 60px; width: 100%; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <h2>🍕 Pizzaria Italia</h2>
+    <input type="file" id="fotoInput" accept="image/*" capture="environment" style="display:none" onchange="ler(event)">
+    <button class="btn-capture" onclick="document.getElementById('fotoInput').click()">📸 TIRAR FOTO</button>
     
-    <input type="file" id="fotoInput" accept="image/*" capture="environment" style="display:none" onchange="lerImagem(event)">
-    <button class="btn-capture" onclick="document.getElementById('fotoInput').click()">📸 TIRA FOTO DA COMANDA</button>
+    <label>Nome:</label>
+    <input type="text" id="nome">
+    <label>Telefone:</label>
+    <input type="tel" id="telefone">
+    <button style="width:100%; margin-top:10px; padding:10px; background:#25D366; border:none; color:white; font-weight:bold; border-radius:5px;" onclick="enviar()">ENVIAR WHATSAPP</button>
     
-    <label>Nome do Cliente:</label>
-    <input type="text" id="nome" placeholder="Digite o nome se a leitura falhar">
-    
-    <label>Telefone (Ex: 63992192222):</label>
-    <input type="tel" id="telefone" placeholder="Ex: 63992192222">
-
-    <div class="actions">
-        <button class="btn-whats" onclick="enviarWhats()">Enviar WhatsApp</button>
-        <button class="btn-copy" onclick="copiar()">Copiar Link</button>
-    </div>
+    <textarea id="debug" class="debug-area" readonly placeholder="Texto lido pelo sistema..."></textarea>
 </div>
 
 <script>
-    async function lerImagem(event) {
+    async function ler(event) {
         const file = event.target.files[0];
         if(!file) return;
-
-        alert("Processando... Aguarde um instante.");
 
         const img = new Image();
         img.src = URL.createObjectURL(file);
@@ -51,45 +40,46 @@
             const canvas = document.createElement('canvas');
             canvas.width = img.width; 
             canvas.height = img.height;
-            canvas.getContext('2d').drawImage(img, 0, 0);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
 
-            // OCR Simples (sem filtros agressivos que destroem a fonte)
+            // Filtro de contraste extremo para destacar números
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            for(let i=0; i<imgData.data.length; i+=4) {
+                let v = (imgData.data[i] + imgData.data[i+1] + imgData.data[i+2]) / 3;
+                v = v < 128 ? 0 : 255; // Binarização absoluta
+                imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = v;
+            }
+            ctx.putImageData(imgData, 0, 0);
+
             Tesseract.recognize(canvas, 'por').then(({ data: { text } }) => {
-                
-                // --- EXTRAÇÃO DE NOME ---
-                // Procura a linha que começa com Nome ou Cliente
-                const linhas = text.split('\n');
-                for(let linha of linhas) {
-                    if (linha.match(/Nome|Cliente/i)) {
-                        const nome = linha.replace(/Nome|Cliente|[:]/gi, '').trim();
-                        document.getElementById('nome').value = nome;
-                    }
-                }
+                document.getElementById('debug').value = text; // Veja o que ele leu aqui
 
-                // --- EXTRAÇÃO DE TELEFONE (A prova de falhas) ---
-                // Remove qualquer texto, traço, parêntese, espaço. Fica só número.
-                const apenasNumeros = text.replace(/\D/g, '');
-                
-                // Procura qualquer sequência de 11 números que comece com 63
-                const regexTel = /639\d{8}/;
-                const match = apenasNumeros.match(regexTel);
+                // EXTRAÇÃO DO NOME
+                // Pega a linha que contém "Nome" ou "Cliente" e tira tudo que não é letra
+                const matchNome = text.match(/(Nome|Cliente)[:\s]*([A-Za-zÀ-ÿ ]+)/i);
+                if(matchNome) document.getElementById('nome').value = matchNome[2].trim();
 
-                if (match) {
-                    document.getElementById('telefone').value = match[0];
+                // EXTRAÇÃO DO TELEFONE (A NOVA ESTRATÉGIA)
+                // 1. Remove absolutamente tudo que NÃO for número
+                const apenasNumeros = text.replace(/[^0-9]/g, '');
+                
+                // 2. Procura uma sequência de 11 números que comece com 639
+                const matchTel = apenasNumeros.match(/639\d{8}/);
+                
+                if(matchTel) {
+                    document.getElementById('telefone').value = matchTel[0];
                 } else {
-                    alert("OCR falhou em detectar o número automaticamente. Por favor, digite o número manualmente.");
-                    console.log("Texto completo lido para debug:", text);
+                    alert("OCR não achou número começando com 63. Verifique a caixa 'Texto lido' abaixo.");
                 }
             });
         };
     }
 
-    function enviarWhats() {
-        let tel = document.getElementById('telefone').value.replace(/\D/g, '');
+    function enviar() {
+        let tel = document.getElementById('telefone').value;
         let nome = document.getElementById('nome').value;
-        if(tel.length < 10) return alert("Telefone inválido!");
-        let msg = encodeURIComponent(`Olá ${nome}, aqui é da Pizzaria Italia. Seu pedido está em preparo! Poderia nos enviar sua localização atual para a entrega?`);
-        window.open(`https://api.whatsapp.com/send?phone=55${tel}&text=${msg}`, '_blank');
+        window.open(`https://wa.me/55${tel}?text=Olá ${nome}, aqui é da Pizzaria Italia. Poderia confirmar sua localização para entrega?`, '_blank');
     }
 </script>
 </body>
