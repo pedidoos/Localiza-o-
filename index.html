@@ -2,84 +2,122 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Leitor de Comanda</title>
+    <title>Leitor de Comanda - Pizzaria Italia</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; display: flex; justify-content: center; }
-        .card { background: white; padding: 20px; border-radius: 15px; width: 100%; max-width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .btn-capture { background: #d32f2f; color: white; width: 100%; padding: 15px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        input { width: 100%; padding: 10px; margin-top: 10px; border: 1px solid #ccc; border-radius: 5px; }
-        .debug-area { font-size: 9px; color: #888; margin-top: 10px; height: 60px; width: 100%; }
+        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 15px; max-width: 400px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        input, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; }
+        .btn-capture { background: #007bff; color: white; font-weight: bold; }
+        .btn-link { background: #25D366; color: white; font-weight: bold; }
+        .btn-copy { background: #6c757d; color: white; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <h2>🍕 Pizzaria Italia</h2>
-    <input type="file" id="fotoInput" accept="image/*" capture="environment" style="display:none" onchange="ler(event)">
-    <button class="btn-capture" onclick="document.getElementById('fotoInput').click()">📸 TIRAR FOTO</button>
     
+    <button class="btn-capture" id="btnCamera" onclick="abrirCamera()">📸 Abrir Câmera</button>
+    
+    <div id="containerCamera" style="display:none;">
+        <video id="videoPreview" autoplay playsinline style="width:100%; background:#000; border-radius:8px;"></video>
+        <button class="btn-capture" style="background:#28a745;" onclick="capturar()">Capturar e Ler</button>
+    </div>
+
     <label>Nome:</label>
     <input type="text" id="nome">
-    <label>Telefone:</label>
+    <label>Telefone do Cliente:</label>
     <input type="tel" id="telefone">
-    <button style="width:100%; margin-top:10px; padding:10px; background:#25D366; border:none; color:white; font-weight:bold; border-radius:5px;" onclick="enviar()">ENVIAR WHATSAPP</button>
-    
-    <textarea id="debug" class="debug-area" readonly placeholder="Texto lido pelo sistema..."></textarea>
+
+    <button class="btn-link" onclick="enviarLink()">Enviar WhatsApp</button>
+    <button class="btn-copy" onclick="copiarParaAreaDeTransferencia()">📋 Copiar Link (Pessoal)</button>
 </div>
 
 <script>
-    async function ler(event) {
-        const file = event.target.files[0];
-        if(!file) return;
+    // --- CONFIGURAÇÃO: COLOQUE O NÚMERO DA SUA PIZZARIA AQUI ---
+    const NUMERO_PIZZARIA = "63992744095"; 
+    // -----------------------------------------------------------
 
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        
-        img.onload = async () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width; 
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
+    let stream = null;
 
-            // Filtro de contraste extremo para destacar números
-            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            for(let i=0; i<imgData.data.length; i+=4) {
-                let v = (imgData.data[i] + imgData.data[i+1] + imgData.data[i+2]) / 3;
-                v = v < 128 ? 0 : 255; // Binarização absoluta
-                imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = v;
-            }
-            ctx.putImageData(imgData, 0, 0);
-
-            Tesseract.recognize(canvas, 'por').then(({ data: { text } }) => {
-                document.getElementById('debug').value = text; // Veja o que ele leu aqui
-
-                // EXTRAÇÃO DO NOME
-                // Pega a linha que contém "Nome" ou "Cliente" e tira tudo que não é letra
-                const matchNome = text.match(/(Nome|Cliente)[:\s]*([A-Za-zÀ-ÿ ]+)/i);
-                if(matchNome) document.getElementById('nome').value = matchNome[2].trim();
-
-                // EXTRAÇÃO DO TELEFONE (A NOVA ESTRATÉGIA)
-                // 1. Remove absolutamente tudo que NÃO for número
-                const apenasNumeros = text.replace(/[^0-9]/g, '');
-                
-                // 2. Procura uma sequência de 11 números que comece com 639
-                const matchTel = apenasNumeros.match(/639\d{8}/);
-                
-                if(matchTel) {
-                    document.getElementById('telefone').value = matchTel[0];
-                } else {
-                    alert("OCR não achou número começando com 63. Verifique a caixa 'Texto lido' abaixo.");
-                }
+    async function abrirCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: "environment" }, advanced: [{ torch: true }] }
             });
-        };
+            document.getElementById('videoPreview').srcObject = stream;
+            document.getElementById('containerCamera').style.display = 'block';
+            document.getElementById('btnCamera').style.display = 'none';
+        } catch(e) { 
+            alert("Flash não disponível, abrindo câmera normal.");
+            abrirCameraSemFlash();
+        }
     }
 
-    function enviar() {
-        let tel = document.getElementById('telefone').value;
+    async function abrirCameraSemFlash() {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
+        document.getElementById('videoPreview').srcObject = stream;
+        document.getElementById('containerCamera').style.display = 'block';
+        document.getElementById('btnCamera').style.display = 'none';
+    }
+
+    async function capturar() {
+        const video = document.getElementById('videoPreview');
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth; 
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        
+        if(stream) stream.getTracks().forEach(t => t.stop());
+        document.getElementById('containerCamera').style.display = 'none';
+        document.getElementById('btnCamera').style.display = 'block';
+
+        Tesseract.recognize(canvas, 'por').then(({ data: { text } }) => {
+            // 1. Extração de Nome
+            const matchNome = text.match(/(?:Nome|Entregar para):\s*([A-Za-zÀ-ÿ]+)/i);
+            if(matchNome) document.getElementById('nome').value = matchNome[1];
+
+            // 2. Extração de Telefone Inteligente
+            let textoLimpo = text
+                .replace(/O/gi, '0').replace(/I|l|\|/gi, '1').replace(/S/gi, '5').replace(/A/gi, '4')
+                .replace(/[^\d]/g, '');
+
+            // Procura números de 11 dígitos, mas IGNORA o da pizzaria
+            const todosNumeros = text.match(/\d{11}/g);
+            let telefoneEncontrado = null;
+
+            if (todosNumeros) {
+                for (let num of todosNumeros) {
+                    // Verifica se o número não é o da pizzaria
+                    if (num !== NUMERO_PIZZARIA) {
+                        telefoneEncontrado = num;
+                        break; // Pegou o primeiro que não é da pizzaria
+                    }
+                }
+            }
+            
+            if(telefoneEncontrado) {
+                document.getElementById('telefone').value = telefoneEncontrado;
+            } else {
+                alert("Não encontrei o telefone do cliente (ou ele é igual ao da pizzaria).");
+            }
+        });
+    }
+
+    function enviarLink() {
+        let tel = document.getElementById('telefone').value.replace(/\D/g, '');
         let nome = document.getElementById('nome').value;
-        window.open(`https://wa.me/55${tel}?text=Olá ${nome}, aqui é da Pizzaria Italia. Poderia confirmar sua localização para entrega?`, '_blank');
+        if(!tel) return alert("Preencha o telefone!");
+        window.open(`https://api.whatsapp.com/send?phone=55${tel}&text=Olá ${nome}, aqui é da Pizzaria.`, '_blank');
+    }
+
+    function copiarParaAreaDeTransferencia() {
+        let tel = document.getElementById('telefone').value.replace(/\D/g, '');
+        let nome = document.getElementById('nome').value;
+        if(!tel) return alert("Preencha o telefone!");
+        let link = `https://wa.me/55${tel}?text=Olá ${nome}, aqui é da Pizzaria.`;
+        navigator.clipboard.writeText(link).then(() => alert("Copiado! Cole no WhatsApp."));
     }
 </script>
 </body>
